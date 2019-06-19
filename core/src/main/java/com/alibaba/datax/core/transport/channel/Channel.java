@@ -27,9 +27,9 @@ public abstract class Channel {
 
     protected int byteCapacity;
 
-    protected long byteSpeed; // bps: bytes/s
+    protected volatile long byteSpeed; // bps: bytes/s
 
-    protected long recordSpeed; // tps: records/s
+    protected volatile long recordSpeed; // tps: records/s
 
     protected long flowControlInterval;
 
@@ -41,7 +41,7 @@ public abstract class Channel {
 
     protected volatile long waitWriterTime = 0;
 
-    private static Boolean isFirstPrint = true;
+    private static volatile Boolean isFirstPrint = true;
 
     private Communication currentCommunication;
 
@@ -61,13 +61,15 @@ public abstract class Channel {
                     "通道容量[%d]必须大于0.", capacity));
         }
 
-        synchronized (isFirstPrint) {
-            if (isFirstPrint) {
-                Channel.LOG.info("Channel set byte_speed_limit to " + byteSpeed
-                        + (byteSpeed <= 0 ? ", No bps activated." : "."));
-                Channel.LOG.info("Channel set record_speed_limit to " + recordSpeed
-                        + (recordSpeed <= 0 ? ", No tps activated." : "."));
-                isFirstPrint = false;
+        if (isFirstPrint) {
+            synchronized (Channel.class) {
+                if (isFirstPrint) {
+                    Channel.LOG.info("Channel set byte_speed_limit to " + byteSpeed
+                            + (byteSpeed <= 0 ? ", No bps activated." : "."));
+                    Channel.LOG.info("Channel set record_speed_limit to " + recordSpeed
+                            + (recordSpeed <= 0 ? ", No tps activated." : "."));
+                    isFirstPrint = false;
+                }
             }
         }
 
@@ -106,6 +108,18 @@ public abstract class Channel {
 
     public long getByteSpeed() {
         return byteSpeed;
+    }
+
+    public void setByteSpeed(long byteSpeed) {
+        this.byteSpeed = byteSpeed;
+    }
+
+    public long getRecordSpeed() {
+        return recordSpeed;
+    }
+
+    public void setRecordSpeed(long recordSpeed) {
+        this.recordSpeed = recordSpeed;
     }
 
     public Configuration getConfiguration() {

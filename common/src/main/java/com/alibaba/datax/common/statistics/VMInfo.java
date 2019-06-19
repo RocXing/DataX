@@ -409,4 +409,12 @@ public class VMInfo {
         }
     }
 
+    public boolean checkPerformance() {
+        double load = osMXBean.getSystemLoadAverage();
+        int processors = osMXBean.getAvailableProcessors();
+        double loadPerCpu = load / processors;
+        LOG.debug("当前cpu的平均负载为" + loadPerCpu);
+        return !(loadPerCpu > 3);
+    }
+
 }

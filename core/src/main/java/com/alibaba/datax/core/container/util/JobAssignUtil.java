@@ -174,4 +174,40 @@ public final class JobAssignUtil {
         return result;
     }
 
+    public static void assignSpeedLimit(List<Configuration> taskGroupConfigs) {
+
+        if (!taskGroupConfigs.isEmpty()) {
+            int taskGroupSize = taskGroupConfigs.size();
+
+            // 配置DATAX_JOB_SETTING_SPEED_AUTOCONTROL_ENABLE为true
+            // 且给定限速则开启TaskGroup的速度控制
+            boolean speedAuto = taskGroupConfigs.get(0).getBool(CoreConstant.DATAX_JOB_SETTING_SPEED_AUTOCONTROL_ENABLE, false);
+            Long jobRecordLimit = taskGroupConfigs.get(0).getLong(CoreConstant.DATAX_JOB_SETTING_SPEED_AUTOCONTROL_RECORDLIMIT);
+            Long jobByteLimit = taskGroupConfigs.get(0).getLong(CoreConstant.DATAX_JOB_SETTING_SPEED_AUTOCONTROL_BYTELIMIT);
+
+            if (speedAuto) {
+                Validate.isTrue((jobByteLimit != null && jobByteLimit > 0) || (jobRecordLimit != null && jobRecordLimit > 0),
+                        "配置了允许速度控制但是没有给定合法的限速");
+                if (jobByteLimit != null && jobByteLimit > 0) {
+                    long taskGroupByteLimit = jobByteLimit / taskGroupSize > 0 ? jobByteLimit / taskGroupSize: 1;
+                    for(Configuration taskGroupConfig: taskGroupConfigs) {
+                        taskGroupConfig.set(CoreConstant.DATAX_CORE_CONTAINER_TASKGROUP_SPEED_BYTE, taskGroupByteLimit);
+                    }
+                }
+
+                if (jobRecordLimit != null && jobRecordLimit > 0) {
+                    long taskGroupRecordLimit = jobRecordLimit / taskGroupSize > 0 ? jobRecordLimit / taskGroupSize: 1;
+                    for(Configuration taskGroupConfig: taskGroupConfigs) {
+                        taskGroupConfig.set(CoreConstant.DATAX_CORE_CONTAINER_TASKGROUP_SPEED_RECORD, taskGroupRecordLimit);
+                    }
+                }
+
+                for(Configuration taskGroupConfig: taskGroupConfigs) {
+                    taskGroupConfig.set(CoreConstant.DATAX_CORE_CONTAINER_TASKGROUP_SPEED_AUTO, true);
+                }
+
+            }
+        }
+    }
+
 }

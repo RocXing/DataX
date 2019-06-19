@@ -103,6 +103,40 @@ public class TaskGroupContainer extends AbstractContainer {
             long reportIntervalInMillSec = this.configuration.getLong(
                     CoreConstant.DATAX_CORE_CONTAINER_TASKGROUP_REPORTINTERVAL,
                     10000);
+
+            /**
+             * 检查是否可以增加channel的时间间隔，如果符合条件，则增加channel
+             */
+            long checkPercentageIntervalInMillSec = this.configuration.getInt(
+                    CoreConstant.DATAX_CORE_CONTAINER_TASKGROUP_CHECKINTERVAL,
+                    1 * 60 * 1000);
+            /**
+             * 最大的channel数
+             */
+            int maxChannel = this.configuration.getInt(
+                    CoreConstant.DATAX_CORE_CONTAINER_TASKGROUP_MAXCHANNEL,
+                    10);
+            /**
+             * 字节限制速度（B/s）
+             */
+            Long byteSpeedLimit = this.configuration.getLong(
+                    CoreConstant.DATAX_CORE_CONTAINER_TASKGROUP_SPEED_BYTE);
+            /**
+             * 行限制速度（L/s）
+             */
+            Long recordSpeedLimit = this.configuration.getLong(
+                    CoreConstant.DATAX_CORE_CONTAINER_TASKGROUP_SPEED_RECORD);
+            // 是否启用自动控速
+            boolean speedAuto = this.configuration.getBool(CoreConstant.DATAX_CORE_CONTAINER_TASKGROUP_SPEED_AUTO, false);
+            boolean byteLimitLegal = byteSpeedLimit != null && byteSpeedLimit > 0;
+            boolean recordLimitLegal = recordSpeedLimit != null && recordSpeedLimit > 0;
+            speedAuto = speedAuto && (byteLimitLegal || recordLimitLegal);
+            if (speedAuto) {
+                LOG.info("开启 TaskGroup {} 的自动控速，最大[{}]字节/秒，[{}]条/秒", this.taskGroupId, byteLimitLegal ? byteSpeedLimit : "NULL",
+                        recordLimitLegal ? recordSpeedLimit : "NULL");
+            }
+
+
             /**
              * 2分钟汇报一次性能统计
              */
@@ -141,6 +175,9 @@ public class TaskGroupContainer extends AbstractContainer {
             Map<Integer, Long> taskStartTimeMap = new HashMap<Integer, Long>(); //任务开始时间
 
             long lastReportTimeStamp = 0;
+            long lastCheckPercentageTimeStamp = System.currentTimeMillis();
+            long previousSpeedByte = 0;
+            long previousSpeedRecord = 0;
             Communication lastTaskGroupContainerCommunication = new Communication();
 
             while (true) {
@@ -154,7 +191,9 @@ public class TaskGroupContainer extends AbstractContainer {
                         continue;
                     }
                     TaskExecutor taskExecutor = removeTask(runTasks, taskId);
-
+                    if (taskExecutor != null && speedAuto) {
+                        assignSpeedLimitToRunningChannel(runTasks, byteSpeedLimit, recordSpeedLimit);
+                    }
                     //上面从runTasks里移除了，因此对应在monitor里移除
                     taskMonitor.removeTask(taskId);
 
@@ -226,11 +265,14 @@ public class TaskGroupContainer extends AbstractContainer {
                     }
                     Configuration taskConfigForRun = taskMaxRetryTimes > 1 ? taskConfig.clone() : taskConfig;
                 	TaskExecutor taskExecutor = new TaskExecutor(taskConfigForRun, attemptCount);
-                    taskStartTimeMap.put(taskId, System.currentTimeMillis());
-                	taskExecutor.doStart();
-
-                    iterator.remove();
                     runTasks.add(taskExecutor);
+                    if (speedAuto) {
+                        assignSpeedLimitToRunningChannel(runTasks, byteSpeedLimit, recordSpeedLimit);
+                    }
+
+                    taskStartTimeMap.put(taskId, System.currentTimeMillis());
+                    taskExecutor.doStart();
+                    iterator.remove();
 
                     //上面，增加task到runTasks列表，因此在monitor里注册。
                     taskMonitor.registerTask(taskId, this.containerCommunicator.getCommunication(taskId));
@@ -265,12 +307,47 @@ public class TaskGroupContainer extends AbstractContainer {
 
                 }
 
+                // 6.定时检查执行机的负载，看是否增加Channel
+                LOG.debug("taskQueue.size(): {}, channelNumber: {}, taskConfigs.size(): {}, now - lastCheckPercentageTimeStamp: {}",
+                        taskQueue.size(), channelNumber , taskConfigs.size(), (now - lastCheckPercentageTimeStamp));
+                if (speedAuto && now - lastCheckPercentageTimeStamp > checkPercentageIntervalInMillSec
+                        && taskQueue.size() != 0 && channelNumber < taskConfigs.size() && channelNumber < maxChannel) {
+                    long nowSpeedRecord = lastTaskGroupContainerCommunication.getLongCounter(CommunicationTool.RECORD_SPEED);
+                    long nowSpeedByte = lastTaskGroupContainerCommunication.getLongCounter(CommunicationTool.BYTE_SPEED);
+                    LOG.info("nowSpeedRecord: {}, nowSpeedByte: {}", nowSpeedRecord, nowSpeedByte);
+                    long recordSpeedEstimated = (nowSpeedRecord / channelNumber) * (channelNumber + 1);
+                    long byteSpeedEstimated = (nowSpeedByte / channelNumber) * (channelNumber + 1);
+                    boolean isPermitted = (byteSpeedLimit == null || byteSpeedEstimated < byteSpeedLimit) && (recordSpeedLimit == null || recordSpeedEstimated < recordSpeedLimit);
+                    LOG.info("预估增加Channel后的速度，是否没有超过上限: {}", isPermitted);
+                    if (isPermitted && VMInfo.getVmInfo().checkPerformance()) {
+                        if (previousSpeedByte != 0 || previousSpeedRecord != 0) {
+                            //默认策略在检查本机负载和最大channel后，还要进行上一次增加channel前后的速度对比。
+                            //具体方法是：判断上一次增加channel后的速度是否比增加前快10%
+                            if ((nowSpeedByte - previousSpeedByte) * 1.0 / previousSpeedByte > 0.1
+                                    || (nowSpeedRecord - previousSpeedRecord) * 1.0 / previousSpeedRecord > 0.1) {
+                                channelNumber++;
+                                previousSpeedByte = nowSpeedByte;
+                                previousSpeedRecord = nowSpeedRecord;
+                                LOG.info("taskGroup[{}] 增加了一个Channel,现在Channel的个数为{}", this.taskGroupId, channelNumber);
+                            } else {
+                                LOG.info("taskGroup[{}] 增速不明显,现在Channel的个数为{}", this.taskGroupId, channelNumber);
+                            }
+                        } else {
+                            //之前还没有增加过
+                            channelNumber++;
+                            previousSpeedByte = nowSpeedByte;
+                            previousSpeedRecord = nowSpeedRecord;
+                            LOG.info("taskGroup[{}] 增加了一个Channel,现在Channel的个数为{}", this.taskGroupId, channelNumber);
+                        }
+                    }
+                    lastCheckPercentageTimeStamp = now;
+                }
+
                 Thread.sleep(sleepIntervalInMillSec);
             }
 
-            //6.最后还要汇报一次
+            //7.最后还要汇报一次
             reportTaskGroupCommunication(lastTaskGroupContainerCommunication, taskCountInThisTaskGroup);
-
 
         } catch (Throwable e) {
             Communication nowTaskGroupContainerCommunication = this.containerCommunicator.collect();
@@ -324,6 +401,34 @@ public class TaskGroupContainer extends AbstractContainer {
     		}
     	}
     	return null;
+    }
+
+    private void assignSpeedLimitToRunningChannel(List<TaskExecutor> taskList, Long taskGroupByteLimit, Long taskGroupRecordLimit) {
+        if (!taskList.isEmpty()) {
+            int size = taskList.size();
+            if (taskGroupByteLimit != null && taskGroupByteLimit > 0) {
+                long byteLimit = getChannelSpeedLimit(taskGroupByteLimit, size);
+                for (TaskExecutor runningExecutor : taskList) {
+                    runningExecutor.setChannelByteSpeedLimit(byteLimit);
+                }
+                LOG.info("TaskGroup {}: 为当前[{}]个Channel重新分配了字节限速[{}]B/s", taskGroupId, taskList.size(), byteLimit);
+            }
+            if (taskGroupRecordLimit != null && taskGroupRecordLimit > 0) {
+                long recordLimit = getChannelSpeedLimit(taskGroupRecordLimit, size);
+                for (TaskExecutor runningExecutor : taskList) {
+                    runningExecutor.setChannelRecordSpeedLimit(recordLimit);
+                }
+                LOG.info("TaskGroup {}: 为当前[{}]个Channel重新分配了行限速[{}]条/秒", taskGroupId, taskList.size(), recordLimit);
+            }
+        }
+    }
+
+    private long getChannelSpeedLimit(long groupLimit, int size) {
+        long channelLimit = groupLimit / size;
+        // 防止limit < size时候为0
+        if (channelLimit <= 0L)
+            channelLimit = 1L;
+        return channelLimit;
     }
     
     private boolean isAllTaskDone(List<TaskExecutor> taskList){
@@ -562,6 +667,17 @@ public class TaskGroupContainer extends AbstractContainer {
 
         private boolean isShutdown(){
             return !readerThread.isAlive() && !writerThread.isAlive();
+        }
+
+        private void setChannelByteSpeedLimit(long byteSpeedLimit) {
+            if (this.channel != null) {
+                this.channel.setByteSpeed(byteSpeedLimit);
+            }
+        }
+        private void setChannelRecordSpeedLimit(long recordSpeedLimit) {
+            if (this.channel != null) {
+                this.channel.setRecordSpeed(recordSpeedLimit);
+            }
         }
     }
 }

@@ -31,6 +31,16 @@ public class CoreConstant {
 
 	public static final String DATAX_CORE_CONTAINER_TASKGROUP_REPORTINTERVAL = "core.container.taskGroup.reportInterval";
 
+	public static final String DATAX_CORE_CONTAINER_TASKGROUP_CHECKINTERVAL = "core.container.taskGroup.checkInterval";
+
+	public static final String DATAX_CORE_CONTAINER_TASKGROUP_MAXCHANNEL = "core.container.taskGroup.maxchannel";
+
+	public static final String DATAX_CORE_CONTAINER_TASKGROUP_SPEED_AUTO = "core.container.taskGroup.speed.auto";
+
+	public static final String DATAX_CORE_CONTAINER_TASKGROUP_SPEED_BYTE = "core.container.taskGroup.speed.byte";
+
+	public static final String DATAX_CORE_CONTAINER_TASKGROUP_SPEED_RECORD = "core.container.taskGroup.speed.record";
+
 	public static final String DATAX_CORE_CONTAINER_TASK_FAILOVER_MAXRETRYTIMES = "core.container.task.failOver.maxRetryTimes";
 
 	public static final String DATAX_CORE_CONTAINER_TASK_FAILOVER_RETRYINTERVALINMSEC = "core.container.task.failOver.retryIntervalInMsec";
@@ -94,6 +104,12 @@ public class CoreConstant {
     public static final String DATAX_JOB_SETTING_ERRORLIMIT_RECORD = "job.setting.errorLimit.record";
 
     public static final String DATAX_JOB_SETTING_ERRORLIMIT_PERCENT = "job.setting.errorLimit.percentage";
+
+	public static final String DATAX_JOB_SETTING_SPEED_AUTOCONTROL_ENABLE = "job.setting.speed.autoControl.enable";
+
+	public static final String DATAX_JOB_SETTING_SPEED_AUTOCONTROL_BYTELIMIT = "job.setting.speed.autoControl.byteLimit";
+
+	public static final String DATAX_JOB_SETTING_SPEED_AUTOCONTROL_RECORDLIMIT = "job.setting.speed.autoControl.recordLimit";
 
     public static final String DATAX_JOB_SETTING_DRYRUN = "job.setting.dryRun";
 

@@ -507,6 +507,7 @@ public class JobContainer extends AbstractContainer {
 
         List<Configuration> taskGroupConfigs = JobAssignUtil.assignFairly(this.configuration,
                 this.needChannelNumber, channelsPerTaskGroup);
+        JobAssignUtil.assignSpeedLimit(taskGroupConfigs);
 
         LOG.info("Scheduler starts [{}] taskGroups.", taskGroupConfigs.size());
 
